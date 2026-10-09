@@ -3,7 +3,7 @@ import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import test from 'node:test'
-import {download, type DownloadChoice} from './ytdlp.js'
+import {buildChoices, download, type DownloadChoice, type VideoInfo} from './ytdlp.js'
 
 const choice: DownloadChoice = {label: 'best', kind: 'video', args: []}
 const noop = {onProgress: () => {}, onProcessing: () => {}}
@@ -69,4 +69,34 @@ setInterval(() => {}, 1000)`,
   assert.deepEqual(await fs.readdir(outDir), [])
   process.kill(Number(await fs.readFile(pidFile, 'utf8')))
   await fs.rm(dir, {recursive: true, force: true})
+})
+
+const MB = 1024 * 1024
+// like YouTube: H.264 up to 1080p (plus an HLS copy with no size), AV1 and VP9 above
+const youtubeLike: VideoInfo = {
+  title: 'clip',
+  duration: 10,
+  formats: [
+    {format_id: '401', vcodec: 'av01.0.12M.08', acodec: 'none', height: 2160, tbr: 12_000, filesize: 20 * MB},
+    {format_id: '313', vcodec: 'vp9', acodec: 'none', height: 2160, tbr: 18_000, filesize: 25 * MB},
+    {format_id: '137', vcodec: 'avc1.640028', acodec: 'none', height: 1080, tbr: 4_000, filesize: 8 * MB},
+    {format_id: '270', vcodec: 'avc1.640028', acodec: 'none', height: 1080, tbr: 4_500},
+    {format_id: '399', vcodec: 'av01.0.08M.08', acodec: 'none', height: 1080, tbr: 2_000, filesize: 4 * MB},
+    {format_id: '248', vcodec: 'vp9', acodec: 'none', height: 1080, tbr: 3_000, filesize: 5 * MB},
+    {format_id: '140', vcodec: 'none', acodec: 'mp4a.40.2', abr: 129, filesize: 1 * MB},
+    {format_id: '251', vcodec: 'none', acodec: 'opus', abr: 135, filesize: 2 * MB},
+  ],
+}
+
+test('video choices ask for H.264, then AV1, with AAC audio before anything else', () => {
+  const [, p1080] = buildChoices(youtubeLike)
+  const selector = p1080!.args[p1080!.args.indexOf('-f') + 1]!
+  assert.ok(
+    selector.startsWith(
+      "bv*[height=1080][vcodec~='^(avc|h264)']+(ba[acodec^=mp4a]/ba)" +
+        '/bv*[height=1080][vcodec^=av01]+(ba[acodec^=mp4a]/ba)' +
+        '/bv*[height=1080]+ba/',
+    ),
+    selector,
+  )
 })

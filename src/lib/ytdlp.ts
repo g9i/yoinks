@@ -142,6 +142,21 @@ export type DownloadChoice = {
 
 const MAX_VIDEO_CHOICES = 8
 
+// QuickTime can't play VP9 and only newer Macs play AV1, but yt-dlp picks
+// them over H.264. Ask for H.264 first, then AV1, with AAC audio.
+const WITH_AAC = '+(ba[acodec^=mp4a]/ba)'
+
+function videoSelector(height: number): string {
+  return [
+    `bv*[height=${height}][vcodec~='^(avc|h264)']${WITH_AAC}`,
+    `bv*[height=${height}][vcodec^=av01]${WITH_AAC}`,
+    `bv*[height=${height}]+ba`,
+    `b[height=${height}]`,
+    `bv*[height<=${height}]+ba`,
+    'b',
+  ].join('/')
+}
+
 export function buildChoices(info: VideoInfo): DownloadChoice[] {
   const formats = info.formats ?? []
   const choices: DownloadChoice[] = []
@@ -162,12 +177,7 @@ export function buildChoices(info: VideoInfo): DownloadChoice[] {
     choices.push({
       kind: 'video',
       label: `${height}p · mp4${sizeLabel}`,
-      args: [
-        '-f',
-        `bv*[height=${height}]+ba/b[height=${height}]/bv*[height<=${height}]+ba/b`,
-        '--merge-output-format',
-        'mp4',
-      ],
+      args: ['-f', videoSelector(height), '--merge-output-format', 'mp4'],
     })
   }
 

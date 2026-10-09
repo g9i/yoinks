@@ -1,4 +1,5 @@
 import React, {useCallback, useEffect, useRef, useState} from 'react'
+import fs from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import {Box, Text, useApp, useInput, useStdout} from 'ink'
@@ -175,8 +176,21 @@ function AppContent({
   const boxWidth = Math.max(14, Math.min(64, columns - 6))
   const contentWidth = Math.max(10, Math.min(columns - 4, 78))
 
+  // delete the old info json when it's replaced or no longer needed
+  const setInfoJson = useCallback((next?: string) => {
+    const previous = infoJsonRef.current
+    infoJsonRef.current = next
+    if (previous && previous !== next) void fs.rm(previous, {force: true}).catch(() => {})
+  }, [])
+
   // stop any running probe or download on quit, or the process keeps going
-  useEffect(() => () => abortRef.current?.abort(), [])
+  useEffect(
+    () => () => {
+      abortRef.current?.abort()
+      setInfoJson(undefined)
+    },
+    [setInfoJson],
+  )
 
   const startProbe = useCallback(async (targetUrl: string) => {
     const controller = new AbortController()
@@ -191,8 +205,11 @@ function AppContent({
       if (controller.signal.aborted) return
       setPhase({name: 'probing', status: 'fetching video info…'})
       const {info: videoInfo, infoJsonPath} = await probe(ytdlp, targetUrl, controller.signal)
-      if (controller.signal.aborted) return
-      infoJsonRef.current = infoJsonPath
+      if (controller.signal.aborted) {
+        void fs.rm(infoJsonPath, {force: true}).catch(() => {})
+        return
+      }
+      setInfoJson(infoJsonPath)
       setInfo(videoInfo)
       setChoices(buildChoices(videoInfo))
       highlightRef.current = 0
@@ -201,7 +218,7 @@ function AppContent({
       if (controller.signal.aborted) return
       setPhase({name: 'error', message: error instanceof Error ? error.message : String(error)})
     }
-  }, [])
+  }, [setInfoJson])
 
   useEffect(() => {
     if (initialUrl) void startProbe(initialUrl)
@@ -213,8 +230,9 @@ function AppContent({
     setPlatform(undefined)
     setInfo(undefined)
     setChoices([])
+    setInfoJson(undefined)
     setPhase({name: 'input'})
-  }, [])
+  }, [setInfoJson])
 
   const cancelRun = useCallback(() => {
     abortRef.current?.abort()

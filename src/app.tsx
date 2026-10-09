@@ -175,6 +175,9 @@ function AppContent({
   const boxWidth = Math.max(14, Math.min(64, columns - 6))
   const contentWidth = Math.max(10, Math.min(columns - 4, 78))
 
+  // stop any running probe or download on quit, or the process keeps going
+  useEffect(() => () => abortRef.current?.abort(), [])
+
   const startProbe = useCallback(async (targetUrl: string) => {
     const controller = new AbortController()
     abortRef.current = controller

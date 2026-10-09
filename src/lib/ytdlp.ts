@@ -18,11 +18,11 @@ function ytDlpAssetName(): string {
 
 // async on purpose: a spawnSync here blocks the event loop, which freezes
 // ink mid-frame — the user hits enter and sees nothing until it returns
-function commandWorks(cmd: string, args: string[]): Promise<boolean> {
+function commandWorks(cmd: string, args: string[], signal?: AbortSignal): Promise<boolean> {
   return new Promise(resolve => {
     let child
     try {
-      child = spawn(cmd, args, {stdio: 'ignore', timeout: 10_000})
+      child = spawn(cmd, args, {stdio: 'ignore', timeout: 10_000, signal})
     } catch {
       resolve(false)
       return
@@ -37,11 +37,13 @@ function commandWorks(cmd: string, args: string[]): Promise<boolean> {
  * downloaded copy, then download the standalone binary from GitHub releases.
  */
 export async function ensureYtDlp(onStatus: (message: string) => void, signal?: AbortSignal): Promise<string> {
-  if (await commandWorks('yt-dlp', ['--version'])) return 'yt-dlp'
+  if (await commandWorks('yt-dlp', ['--version'], signal)) return 'yt-dlp'
 
   const local = path.join(YOINKS_DIR, process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp')
-  if (await commandWorks(local, ['--version'])) return local
+  if (await commandWorks(local, ['--version'], signal)) return local
 
+  // a cancelled check also returns false
+  signal?.throwIfAborted()
   onStatus('first run: fetching yt-dlp…')
   await fs.mkdir(YOINKS_DIR, {recursive: true})
 

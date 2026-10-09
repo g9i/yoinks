@@ -234,11 +234,16 @@ function AppContent({
     setPhase({name: 'input'})
   }, [setInfoJson])
 
+  // go back to the input but keep the link
+  const backToUrl = useCallback(() => {
+    resetToInput()
+    setUrlInput(url)
+  }, [resetToInput, url])
+
   const cancelRun = useCallback(() => {
     abortRef.current?.abort()
-    resetToInput()
-    setUrlInput(url) // keep the link around so a cancel isn't destructive
-  }, [resetToInput, url])
+    backToUrl()
+  }, [backToUrl])
 
   useInput(
     (input, key) => {
@@ -248,7 +253,8 @@ function AppContent({
       }
       if (key.escape && (phase.name === 'picking' || phase.name === 'error' || phase.name === 'done')) resetToInput()
       if (key.escape && (phase.name === 'probing' || phase.name === 'downloading')) cancelRun()
-      if (key.return && (phase.name === 'error' || phase.name === 'done')) resetToInput()
+      if (key.return && phase.name === 'error') backToUrl()
+      if (key.return && phase.name === 'done') resetToInput()
     },
     {isActive: Boolean(process.stdin.isTTY)},
   )
@@ -318,7 +324,8 @@ function AppContent({
     if (key === '↵') {
       if (phase.name === 'input') return () => handleUrlSubmit(urlInput)
       if (phase.name === 'picking') return () => handlePick({value: highlightRef.current})
-      if (phase.name === 'error' || phase.name === 'done') return resetToInput
+      if (phase.name === 'error') return backToUrl
+      if (phase.name === 'done') return resetToInput
     }
     return undefined // ↑↓ / ↑ stay keyboard-only
   }

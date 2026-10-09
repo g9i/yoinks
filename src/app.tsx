@@ -5,7 +5,7 @@ import path from 'node:path'
 import {Box, Text, useApp, useInput, useStdout} from 'ink'
 import SelectInput, {type IndicatorProps, type ItemProps} from 'ink-select-input'
 import Spinner from 'ink-spinner'
-import {FramedInput} from './components/framed-input.js'
+import {FramedInput, frameButtonWidth} from './components/framed-input.js'
 import {FullScreen} from './components/fullscreen.js'
 import {Logo} from './components/logo.js'
 import {Panel} from './components/panel.js'
@@ -173,7 +173,8 @@ function AppContent({
   const [phase, setPhase] = useState<Phase>(initialUrl ? {name: 'probing', status: 'warming up…'} : {name: 'input'})
 
   const columns = stdout?.columns && stdout.columns > 0 ? stdout.columns : 80
-  const boxWidth = Math.max(14, Math.min(64, columns - 6))
+  // leave room for the button next to the box
+  const boxWidth = Math.max(14, Math.min(64, columns - 6 - frameButtonWidth(YOINK_BUTTON)))
   const contentWidth = Math.max(10, Math.min(columns - 4, 78))
 
   // delete the old info json when it's replaced or no longer needed

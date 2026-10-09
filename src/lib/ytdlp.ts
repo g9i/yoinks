@@ -215,19 +215,47 @@ const PROGRESS_TEMPLATE = `${PROGRESS_PREFIX}%(progress.downloaded_bytes)s|%(pro
 let activeChild: ChildProcess | undefined
 process.on('exit', () => activeChild?.kill('SIGTERM'))
 
-export function download(
-  opts: {
-    ytdlp: string
-    ffmpegLocation?: string
-    url: string
-    /** When set, reuse the probe's metadata instead of re-extracting — starts much faster. */
-    infoJsonPath?: string
-    choice: DownloadChoice
-    outDir: string
-  },
-  handlers: DownloadHandlers,
-  signal?: AbortSignal,
-): Promise<string> {
+type DownloadOptions = {
+  ytdlp: string
+  ffmpegLocation?: string
+  url: string
+  /** When set, reuse the probe's metadata instead of re-extracting — starts much faster. */
+  infoJsonPath?: string
+  choice: DownloadChoice
+  outDir: string
+}
+
+export async function download(opts: DownloadOptions, handlers: DownloadHandlers, signal?: AbortSignal): Promise<string> {
+  // yt-dlp skips a file that already exists and returns the old one, so
+  // download into an empty folder and pick a free name at the end
+  await fs.mkdir(opts.outDir, {recursive: true})
+  const staging = await fs.mkdtemp(path.join(opts.outDir, '.yoinks-'))
+  try {
+    const staged = await runYtDlp({...opts, outDir: staging}, handlers, signal)
+    return await moveToFreeName(staged, opts.outDir)
+  } finally {
+    // this also removes partial files from a cancelled or failed download
+    await fs.rm(staging, {recursive: true, force: true}).catch(() => {})
+  }
+}
+
+/** Moves file into dir, adding " (1)", " (2)"… if the name is taken. */
+async function moveToFreeName(file: string, dir: string): Promise<string> {
+  const {name, ext} = path.parse(file)
+  for (let n = 0; ; n++) {
+    const target = path.join(dir, n === 0 ? `${name}${ext}` : `${name} (${n})${ext}`)
+    const taken = await fs.lstat(target).then(
+      () => true,
+      () => false,
+    )
+    if (!taken) {
+      await fs.rename(file, target)
+      return target
+    }
+  }
+}
+
+function runYtDlp(opts: DownloadOptions, handlers: DownloadHandlers, signal?: AbortSignal): Promise<string> {
   const args = [
     ...(opts.infoJsonPath ? ['--load-info-json', opts.infoJsonPath] : [opts.url]),
     ...opts.choice.args,
@@ -258,8 +286,6 @@ export function download(
     let totalParts = 1
     let lastDownloaded = 0
     let buffer = ''
-    // every file yt-dlp writes this run, so a cancel can clean up after itself
-    const destinations: string[] = []
 
     child.stdout.on('data', (chunk: Buffer) => {
       buffer += chunk.toString()
@@ -285,28 +311,24 @@ export function download(
           // "[info] xxx: Downloading 1 format(s): 395+251" — each id is one file
           totalParts = (line.split('format(s):')[1] ?? '').trim().split('+').length
         } else if (line.includes('[Merger]') || line.includes('[ExtractAudio]')) {
-          const merging = /^\[Merger\] Merging formats into "(.+)"$/.exec(line)?.[1]
-          const extracting = /^\[ExtractAudio\] Destination: (.+)$/.exec(line)?.[1]
-          const target = merging ?? extracting
-          if (target) destinations.push(target)
           handlers.onProcessing()
-        } else if (line.startsWith('[download] Destination: ')) {
-          destinations.push(line.slice('[download] Destination: '.length))
         } else if (path.isAbsolute(line)) {
           filepath = line
         }
       }
     })
     child.stderr.on('data', chunk => (stderr += chunk))
-    child.on('error', reject)
-    child.on('close', code => {
+    child.on('error', error => {
+      if (!signal?.aborted) reject(error)
+    })
+    // on cancel, wait for yt-dlp to exit but not for 'close': something it
+    // started (like ffmpeg) can keep the pipes open for a while
+    child.on('exit', () => {
       activeChild = undefined
-      if (signal?.aborted) {
-        // cancelled on purpose — don't leave half-written files behind
-        void removePartials(destinations)
-        reject(new Error('Download cancelled.'))
-        return
-      }
+      if (signal?.aborted) reject(new Error('Download cancelled.'))
+    })
+    child.on('close', code => {
+      if (signal?.aborted) return
       if (code === 0 && filepath) {
         resolve(filepath)
       } else {
@@ -314,14 +336,6 @@ export function download(
       }
     })
   })
-}
-
-function removePartials(destinations: string[]): Promise<unknown> {
-  return Promise.allSettled(
-    destinations
-      .flatMap(dest => [dest, `${dest}.part`, `${dest}.ytdl`])
-      .map(file => fs.rm(file, {force: true})),
-  )
 }
 
 function toNumber(value: string | undefined): number | undefined {

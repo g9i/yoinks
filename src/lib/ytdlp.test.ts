@@ -100,3 +100,23 @@ test('video choices ask for H.264, then AV1, with AAC audio before anything else
     selector,
   )
 })
+
+test('size estimates describe the streams that get downloaded', () => {
+  const labels = buildChoices(youtubeLike).map(choice => choice.label)
+  assert.deepEqual(labels, [
+    '2160p · mp4 · ~21 MB', // AV1 + AAC
+    '1080p · mp4 · ~9.0 MB', // H.264 + AAC
+    'audio only · mp3 · ~2.0 MB',
+  ])
+})
+
+test('a video row with an unknown size shows no estimate rather than the audio size', () => {
+  const [p720] = buildChoices({
+    title: 'clip',
+    formats: [
+      {format_id: 'hls-720', vcodec: 'avc1', acodec: 'none', height: 720},
+      {format_id: 'audio', vcodec: 'none', acodec: 'mp4a.40.2', abr: 128, filesize: MB},
+    ],
+  })
+  assert.equal(p720!.label, '720p · mp4')
+})

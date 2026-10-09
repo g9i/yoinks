@@ -162,17 +162,23 @@ export function buildChoices(info: VideoInfo): DownloadChoice[] {
   const choices: DownloadChoice[] = []
 
   const audioOnly = formats.filter(f => f.acodec && f.acodec !== 'none' && (!f.vcodec || f.vcodec === 'none'))
-  const bestAudio = [...audioOnly].sort((a, b) => (b.abr ?? b.tbr ?? 0) - (a.abr ?? a.tbr ?? 0))[0]
-  const audioSize = bestAudio?.filesize ?? bestAudio?.filesize_approx
+  const bestAudio = [...audioOnly].sort(byBitrate)[0]
+  const audioSize = sizeOf(bestAudio)
+  const videoAudio = audioOnly.filter(f => f.acodec?.startsWith('mp4a')).sort(byBitrate)[0] ?? bestAudio
 
   const videos = formats.filter(f => f.vcodec && f.vcodec !== 'none' && f.height)
   const heights = [...new Set(videos.map(f => f.height as number))].sort((a, b) => b - a)
 
   for (const height of heights.slice(0, MAX_VIDEO_CHOICES)) {
     const candidates = videos.filter(f => f.height === height)
-    const best = [...candidates].sort((a, b) => scoreVideo(b) - scoreVideo(a))[0]
+    // guess the stream videoSelector will get, so the size matches the download
+    const preferred = [isH264, isAv1].map(is => candidates.filter(is)).find(group => group.length > 0) ?? candidates
+    const best = [...preferred].sort((a, b) => Number(Boolean(sizeOf(b))) - Number(Boolean(sizeOf(a))) || byBitrate(a, b))[0]!
     const muxed = best.acodec && best.acodec !== 'none'
-    const size = (best.filesize ?? best.filesize_approx ?? 0) + (muxed ? 0 : audioSize ?? 0)
+    const audio = isH264(best) || isAv1(best) ? videoAudio : bestAudio
+    const videoSize = sizeOf(best) ?? (best.tbr && info.duration ? (best.tbr * 1000 * info.duration) / 8 : undefined)
+    // if the video size is unknown, show nothing rather than just the audio size
+    const size = videoSize === undefined ? 0 : videoSize + (muxed ? 0 : sizeOf(audio) ?? 0)
     const sizeLabel = size > 0 ? ` · ~${formatBytes(size)}` : ''
     choices.push({
       kind: 'video',
@@ -199,12 +205,10 @@ export function buildChoices(info: VideoInfo): DownloadChoice[] {
   return choices
 }
 
-function scoreVideo(f: RawFormat): number {
-  let score = f.tbr ?? 0
-  if (f.ext === 'mp4') score += 10_000
-  if (f.vcodec?.startsWith('avc')) score += 5_000
-  return score
-}
+const isH264 = (f: RawFormat) => /^(avc|h264)/.test(f.vcodec ?? '')
+const isAv1 = (f: RawFormat) => f.vcodec?.startsWith('av01') ?? false
+const sizeOf = (f?: RawFormat) => f?.filesize ?? f?.filesize_approx
+const byBitrate = (a: RawFormat, b: RawFormat) => (b.abr ?? b.tbr ?? 0) - (a.abr ?? a.tbr ?? 0)
 
 export type DownloadProgress = {
   downloadedBytes: number
